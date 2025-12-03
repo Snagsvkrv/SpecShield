@@ -3,6 +3,7 @@ package com.dpw.specshield.dto;
 import lombok.Data;
 import com.dpw.specshield.model.TestExecution;
 import java.util.List;
+import java.util.Map;
 
 @Data
 public class TestReportResponse {
@@ -17,5 +18,14 @@ public class TestReportResponse {
         private Integer errors;
         private Integer warnings;
         private Integer successful;
+        private Map<String, PathStats> paths;
+    }
+
+    @Data
+    public static class PathStats {
+        private Integer total;
+        private Integer successful;
+        private Integer errors;
+        private Integer warnings;
     }
 }

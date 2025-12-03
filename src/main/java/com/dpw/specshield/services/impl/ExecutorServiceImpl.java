@@ -17,6 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.Payload;
@@ -33,6 +34,8 @@ import java.util.stream.Collectors;
 
 import static org.springframework.http.HttpMethod.DELETE;
 import static org.springframework.http.HttpMethod.GET;
+import static org.springframework.http.HttpMethod.HEAD;
+import static org.springframework.http.HttpMethod.OPTIONS;
 import static org.springframework.http.HttpMethod.POST;
 import static org.springframework.http.HttpMethod.PUT;
 
@@ -58,7 +61,6 @@ public class ExecutorServiceImpl implements IExecutorService {
 
             Map<String, List<TestCase>> groupedByUrl = groupTestCasesByUrl(testSuite.getTestCases());
 
-            // Use existing result if provided (for real-time updates) or create new one
             TestResult testResult;
             if (existingResult != null) {
                 testResult = existingResult;
@@ -66,7 +68,6 @@ public class ExecutorServiceImpl implements IExecutorService {
                 testResult.setStatus("PROCESSING");
                 testResultRepository.save(testResult);
             } else {
-                // For direct execution (backwards compatibility)
                 testResult = new TestResult();
                 testResult.setTestSuiteName(testSuite.getTestSuiteName());
                 testResult.setExecutionStartTime(startTime);
@@ -98,14 +99,27 @@ public class ExecutorServiceImpl implements IExecutorService {
             LocalDateTime endTime = LocalDateTime.now();
             Duration duration = Duration.between(startTime, endTime);
 
-            // Final update
-            testResult.setExecutionEndTime(endTime);
-            testResult.setExecutionDuration(formatDuration(duration));
-            testResult.setStatus("COMPLETED");
-            testResult.setPendingTests(0);
-            testResult.setExecutions(allExecutions);
+            synchronized (updateLock) {
+                TestResult latestResult = testResultRepository.findById(testResult.getId()).orElse(testResult);
+                latestResult.setExecutionEndTime(endTime);
+                latestResult.setExecutionDuration(formatDuration(duration));
+                latestResult.setStatus("COMPLETED");
+                latestResult.setPendingTests(0);
 
-            testResult = testResultRepository.save(testResult);
+                if (latestResult.getExecutions() == null) {
+                    latestResult.setExecutions(new ArrayList<>());
+                }
+
+                for (TestExecution execution : allExecutions) {
+                    boolean exists = latestResult.getExecutions().stream()
+                        .anyMatch(e -> execution.getId().equals(e.getId()));
+                    if (!exists) {
+                        latestResult.getExecutions().add(execution);
+                    }
+                }
+
+                testResult = testResultRepository.save(latestResult);
+            }
 
             log.info("Test suite execution completed: {} with {} tests",
                     testSuite.getTestSuiteName(), allExecutions.size());
@@ -122,7 +136,6 @@ public class ExecutorServiceImpl implements IExecutorService {
                     .map(testCase -> {
                         TestExecution execution = executeTestCase(testCase, baseUrl);
 
-                        // Update result in real-time after each test execution
                         updateTestResultRealTime(testResult, execution);
 
                         return execution;
@@ -131,60 +144,88 @@ public class ExecutorServiceImpl implements IExecutorService {
         });
     }
 
-    private synchronized void updateTestResultRealTime(TestResult testResult, TestExecution execution) {
-        try {
-            // Fetch latest result from database to ensure consistency
-            TestResult latestResult = testResultRepository.findById(testResult.getId()).orElse(testResult);
+    private final Object updateLock = new Object();
 
-            // Add the new execution
-            if (latestResult.getExecutions() == null) {
-                latestResult.setExecutions(new ArrayList<>());
+    private void updateTestResultRealTime(TestResult testResult, TestExecution execution) {
+        synchronized (updateLock) {
+            int maxRetries = 3;
+            try {
+                for (int retry = 0; retry < maxRetries; retry++) {
+                    try {
+                        TestResult latestResult = testResultRepository.findById(testResult.getId()).orElse(testResult);
+
+                        if (latestResult.getExecutions() == null) {
+                            latestResult.setExecutions(new ArrayList<>());
+                        }
+
+                        boolean executionExists = latestResult.getExecutions().stream()
+                            .anyMatch(e -> execution.getId().equals(e.getId()));
+
+                        if (!executionExists) {
+                            latestResult.getExecutions().add(execution);
+
+                            if ("success".equals(execution.getResult())) {
+                                latestResult.setSuccessfulTests(latestResult.getSuccessfulTests() + 1);
+                            } else if ("error".equals(execution.getResult())) {
+                                latestResult.setErrorTests(latestResult.getErrorTests() + 1);
+                            } else if ("warning".equals(execution.getResult())) {
+                                latestResult.setWarningTests(latestResult.getWarningTests() + 1);
+                            }
+
+                            int completedTests = latestResult.getSuccessfulTests() + latestResult.getErrorTests() + latestResult.getWarningTests();
+                            latestResult.setPendingTests(latestResult.getTotalTests() - completedTests);
+
+                            testResultRepository.save(latestResult);
+
+                            log.debug("Updated test result in real-time: {}/{} tests completed",
+                                     completedTests, latestResult.getTotalTests());
+                        } else {
+                            log.debug("Execution {} already exists, skipping duplicate update", execution.getId());
+                        }
+                        break;
+                    } catch (Exception e) {
+                        if (retry == maxRetries - 1) {
+                            throw e;
+                        }
+                        log.warn("Retry {} failed for test result update: {}", retry + 1, e.getMessage());
+                        Thread.sleep(100);
+                    }
+                }
+
+            } catch (Exception e) {
+                log.error("Failed to update test result in real-time after {} retries: {}", maxRetries, e.getMessage());
             }
-            latestResult.getExecutions().add(execution);
-
-            // Update counts
-            if ("success".equals(execution.getResult())) {
-                latestResult.setSuccessfulTests(latestResult.getSuccessfulTests() + 1);
-            } else if ("error".equals(execution.getResult())) {
-                latestResult.setErrorTests(latestResult.getErrorTests() + 1);
-            }
-
-            // Update pending count
-            int completedTests = latestResult.getSuccessfulTests() + latestResult.getErrorTests() + latestResult.getWarningTests();
-            latestResult.setPendingTests(latestResult.getTotalTests() - completedTests);
-
-            // Save updated result
-            testResultRepository.save(latestResult);
-
-            log.debug("Updated test result in real-time: {}/{} tests completed",
-                     completedTests, latestResult.getTotalTests());
-
-        } catch (Exception e) {
-            log.warn("Failed to update test result in real-time: {}", e.getMessage());
         }
     }
 
     @KafkaListener(topics = "${specshield.kafka.topics.test-execution}")
     public void processTestExecutionRequest(@Header(KafkaHeaders.RECEIVED_KEY) String executionId,
-                                          @Payload TestExecutionRequest request) {
+                                          @Payload TestExecutionRequest request,
+                                          Acknowledgment acknowledgment) {
         log.info("Received test execution request from Kafka with ID: {}", executionId);
 
         try {
-            // Update request status to PROCESSING
             request.setStatus("PROCESSING");
             testExecutionRequestRepository.save(request);
 
-            // Create initial test result with pending status
             TestResult initialResult = testResultRepository.findById(executionId).get();
 
-            // Execute the test suite asynchronously
             executeTestSuiteAsync(request, initialResult);
+
+            acknowledgment.acknowledge();
+            log.debug("Message acknowledged for execution ID: {}", executionId);
 
         } catch (Exception e) {
             log.error("Error processing test execution request {}: {}", executionId, e.getMessage());
-            // Update request status to FAILED
-            request.setStatus("FAILED");
-            testExecutionRequestRepository.save(request);
+            try {
+                request.setStatus("FAILED");
+                testExecutionRequestRepository.save(request);
+                acknowledgment.acknowledge();
+                log.debug("Message acknowledged after failure for execution ID: {}", executionId);
+            } catch (Exception saveException) {
+                log.error("Failed to save error status for execution {}: {}", executionId, saveException.getMessage());
+                throw saveException;
+            }
         }
     }
 
@@ -193,10 +234,8 @@ public class ExecutorServiceImpl implements IExecutorService {
             try {
                 log.info("Starting asynchronous test suite execution: {}", request.getTestSuiteName());
 
-                // Execute the test suite with real-time updates
                 String resultId = executeTestSuiteWithRealTimeUpdates(request.getTestSuite(), testResult).join();
 
-                // Update request status to COMPLETED
                 request.setStatus("COMPLETED");
                 testExecutionRequestRepository.save(request);
 
@@ -207,7 +246,6 @@ public class ExecutorServiceImpl implements IExecutorService {
                 log.error("Error in asynchronous test execution for request {}: {}",
                          request.getId(), e.getMessage());
 
-                // Update statuses to FAILED
                 testResult.setStatus("FAILED");
                 testResultRepository.save(testResult);
                 request.setStatus("FAILED");
@@ -245,6 +283,8 @@ public class ExecutorServiceImpl implements IExecutorService {
             String fullUrl = buildFullUrl(testCase, baseUrl);
             execution.setFullRequestPath(fullUrl);
 
+            execution.setResponseDetails(buildResponseDetails(response));
+
             boolean testPassed = validateResponse(response, execution.getExpectedResult());
 
             if (testPassed) {
@@ -264,10 +304,19 @@ public class ExecutorServiceImpl implements IExecutorService {
             execution.setResultDetails(String.format("HTTP Error: %s", e.getMessage()));
             execution.setFullRequestPath(buildFullUrl(testCase, baseUrl));
             execution.setRequestDetails(buildRequestDetails(testCase, buildFullUrl(testCase, baseUrl)));
+
+            execution.setResponseDetails(buildResponseDetailsFromException(e));
         } catch (Exception e) {
             log.error("Error executing test case {}: {}", testCase.getTestCaseId(), e.getMessage());
             execution.setResult("error");
             execution.setResultDetails(String.format("Execution Error: %s", e.getMessage()));
+
+            // Set empty response details for general exceptions
+            TestExecution.ResponseDetails details = new TestExecution.ResponseDetails();
+            details.setResponseStatus(null);
+            details.setResponseBody("Error occurred before receiving response: " + e.getMessage());
+            details.setResponseHeaders(new HashMap<>());
+            execution.setResponseDetails(details);
         }
 
         return execution;
@@ -291,6 +340,10 @@ public class ExecutorServiceImpl implements IExecutorService {
                     .bodyValue(testCase.getRequest().getBody() != null ? testCase.getRequest().getBody() : "");
         } else if (method == DELETE) {
             request = webClient.delete().uri(url);
+        } else if (method == OPTIONS) {
+            request = webClient.options().uri(url);
+        } else if (method == HEAD) {
+            request = webClient.head().uri(url);
         } else {
             throw new UnsupportedOperationException("HTTP method not supported: " + method);
         }
@@ -319,7 +372,6 @@ public class ExecutorServiceImpl implements IExecutorService {
             url = urlBuilder.toString().replaceAll("&$", "");
         }
 
-        // Use provided baseUrl instead of hardcoded localhost
         String fullUrl = baseUrl + url;
         return fullUrl;
     }
@@ -372,7 +424,6 @@ public class ExecutorServiceImpl implements IExecutorService {
         TestExecution.RequestDetails details = new TestExecution.RequestDetails();
         details.setHeaders(testCase.getRequest().getHeaders());
 
-        // Serialize payload to JSON string to avoid MongoDB serialization issues
         if (testCase.getRequest().getBody() != null) {
             try {
                 details.setPayload(objectMapper.writeValueAsString(testCase.getRequest().getBody()));
@@ -409,26 +460,39 @@ public class ExecutorServiceImpl implements IExecutorService {
         return curl.toString();
     }
 
-    private TestResult buildTestResult(TestSuite testSuite, LocalDateTime startTime,
-                                     LocalDateTime endTime, Duration duration,
-                                     List<TestExecution> executions) {
-        TestResult result = new TestResult();
-        result.setTestSuiteName(testSuite.getTestSuiteName());
-        result.setExecutionStartTime(startTime);
-        result.setExecutionEndTime(endTime);
-        result.setExecutionDuration(formatDuration(duration));
-        result.setTotalTests(executions.size());
-        result.setSuccessfulTests((int) executions.stream().filter(e -> "success".equals(e.getResult())).count());
-        result.setErrorTests((int) executions.stream().filter(e -> "error".equals(e.getResult())).count());
-        result.setWarningTests(0);
-        result.setPendingTests(0);
-        result.setStatus("COMPLETED");
-        result.setExecutions(executions);
-
-        return result;
-    }
-
     private String formatDuration(Duration duration) {
         return duration.toMillis() + "ms";
+    }
+
+    private TestExecution.ResponseDetails buildResponseDetails(ResponseEntity<String> response) {
+        TestExecution.ResponseDetails details = new TestExecution.ResponseDetails();
+        details.setResponseStatus(response.getStatusCode().value());
+        details.setResponseBody(response.getBody());
+
+        Map<String, String> headerMap = new HashMap<>();
+        response.getHeaders().forEach((key, values) -> {
+            if (values != null && !values.isEmpty()) {
+                headerMap.put(key, String.join(", ", values));
+            }
+        });
+        details.setResponseHeaders(headerMap);
+
+        return details;
+    }
+
+    private TestExecution.ResponseDetails buildResponseDetailsFromException(WebClientResponseException e) {
+        TestExecution.ResponseDetails details = new TestExecution.ResponseDetails();
+        details.setResponseStatus(e.getStatusCode().value());
+        details.setResponseBody(e.getResponseBodyAsString());
+
+        Map<String, String> headerMap = new HashMap<>();
+        e.getHeaders().forEach((key, values) -> {
+            if (values != null && !values.isEmpty()) {
+                headerMap.put(key, String.join(", ", values));
+            }
+        });
+        details.setResponseHeaders(headerMap);
+
+        return details;
     }
 }
