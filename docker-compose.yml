@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  specshield-app:
+    build: .
+    ports:
+      - "9000:9000"
+    depends_on:
+      - mongodb
+    environment:
+      - SPRING_DATA_MONGODB_URI=mongodb://mongodb:27017/specshield
+    networks:
+      - specshield-network
+
+  mongodb:
+    image: mongo:7.0
+    container_name: specshield-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_DATABASE=specshield
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - specshield-network
+
+volumes:
+  mongodb_data:
+
+networks:
+  specshield-network:
+    driver: bridge
