@@ -14,9 +14,11 @@ import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.*;
 import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.serializer.ErrorHandlingDeserializer;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.kafka.support.serializer.JsonSerializer;
+import org.springframework.util.backoff.FixedBackOff;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -64,7 +66,10 @@ public class KafkaConfig {
         configProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         configProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ErrorHandlingDeserializer.class);
         configProps.put(ErrorHandlingDeserializer.VALUE_DESERIALIZER_CLASS, JsonDeserializer.class.getName());
-        configProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        configProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
+        configProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+        configProps.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, 10000);
+        configProps.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, 3000);
 
         ObjectMapper objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
@@ -81,7 +86,17 @@ public class KafkaConfig {
     public ConcurrentKafkaListenerContainerFactory<String, TestExecutionRequest> kafkaListenerContainerFactory() {
         ConcurrentKafkaListenerContainerFactory<String, TestExecutionRequest> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory());
-        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
+
+        // Manual acknowledgment to prevent reprocessing
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
+
+        // Error handler with retry - max 1 retry with 1 second interval
+        DefaultErrorHandler errorHandler = new DefaultErrorHandler(new FixedBackOff(1000L, 1));
+        factory.setCommonErrorHandler(errorHandler);
+
+        // Concurrency settings
+        factory.setConcurrency(1);
+
         return factory;
     }
 

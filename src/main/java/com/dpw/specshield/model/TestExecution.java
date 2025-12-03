@@ -16,12 +16,20 @@ public class TestExecution {
     private String fullRequestPath;
     private String httpMethod;
     private RequestDetails requestDetails;
+    private ResponseDetails responseDetails;
 
     @Data
     public static class RequestDetails {
         private Map<String, String> headers;
         private String payload;
         private String curl;
+    }
+
+    @Data
+    public static class ResponseDetails {
+        private Integer responseStatus;
+        private String responseBody;
+        private Map<String, String> responseHeaders;
     }
 
 }
