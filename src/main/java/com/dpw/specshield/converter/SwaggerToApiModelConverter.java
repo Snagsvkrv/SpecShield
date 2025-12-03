@@ -2,6 +2,7 @@ package com.dpw.specshield.converter;
 
 import com.dpw.specshield.model.ApiSpec;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
@@ -14,7 +15,7 @@ public class SwaggerToApiModelConverter {
 
         for (Map.Entry<String, JsonNode> entry : rawSchemas.entrySet()) {
             String apiName = entry.getKey();
-            JsonNode schemaNode = entry.getValue();
+            JsonNode wrapper = entry.getValue();
 
             String[] parts = apiName.split(" ", 2);
             if (parts.length != 2) continue;
@@ -23,7 +24,24 @@ public class SwaggerToApiModelConverter {
             spec.setMethod(parts[0]);
             spec.setPath(parts[1]);
             spec.setName(apiName);
-            spec.setSchema(schemaNode);
+
+            // request body schema
+            JsonNode bodySchema = wrapper.get("schema");
+            spec.setSchema(bodySchema);
+
+            // query params
+            Map<String, String> queryParams = new HashMap<>();
+            JsonNode qp = wrapper.get("_queryParams");
+            if (qp != null && qp.isObject()) {
+                qp.fields().forEachRemaining(e -> queryParams.put(e.getKey(), e.getValue().asText()));
+            }
+            spec.setQueryParams(queryParams);
+
+            // response schema
+            JsonNode respSchema = wrapper.get("_responseSchema");
+            if (respSchema != null && !respSchema.isMissingNode()) {
+                spec.setResponseSchema(respSchema);
+            }
 
             apiSpecs.add(spec);
         }

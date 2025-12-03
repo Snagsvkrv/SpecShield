@@ -28,9 +28,9 @@ public class ReportController {
     public ResponseEntity<?> getReportById(
             @PathVariable Long id) throws Exception {
         log.info("Received report request");
-        TestSuite suite = testSuiteService.generate();
-        String json = TestSuiteSerializer.serialize(suite);
-        return ResponseEntity.status(HttpStatus.CREATED).body(json);
+//        TestSuite suite = testSuiteService.generate();
+//        String json = TestSuiteSerializer.serialize(suite);
+        return ResponseEntity.status(HttpStatus.CREATED).body(null);
     }
 
     @PostMapping("/generate")
