@@ -11,8 +11,10 @@ services:
       kafka:
         condition: service_healthy
     environment:
-      - SPRING_DATA_MONGODB_URI=mongodb://mongodb:27017/specshield
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      SPRING_DATA_MONGODB_HOST: "specshield-mongodb"
+      SPRING_DATA_MONGODB_PORT: "27017"
+      SPRING_DATA_MONGODB_DATABASE: "specshield"
+      KAFKA_BOOTSTRAP_SERVERS: "specshield-kafka:9092"
     networks:
       - specshield-network
 
@@ -33,39 +35,44 @@ services:
       timeout: 5s
       retries: 5
 
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.4.0
-    container_name: specshield-zookeeper
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    networks:
-      - specshield-network
-
   kafka:
-    image: confluentinc/cp-kafka:7.4.0
+    image: bitnami/kafka:latest
     container_name: specshield-kafka
+    hostname: kafka
     ports:
       - "9092:9092"
-    depends_on:
-      - zookeeper
+      - "9093:9093"
     environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://specshield-kafka:9092"
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_CFG_NODE_ID: "0"
+      KAFKA_CFG_PROCESS_ROLES: "broker,controller"
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "0@kafka:9093"
+      KAFKA_CFG_MESSAGE_MAX_BYTES: "524288000"              # broker
+      KAFKA_CFG_SOCKET_REQUEST_MAX_BYTES: "524288000"       # socket layer LIMIT
+      KAFKA_CFG_RECEIVE_BUFFER_BYTES: "524288000"           # network receive
+      KAFKA_CFG_SEND_BUFFER_BYTES: "524288000"              # network send
+      KAFKA_CFG_MAX_REQUEST_SIZE: "524288000"               # client request limit
+      KAFKA_CFG_REPLICA_FETCH_MAX_BYTES: "524288000"
+      KAFKA_CFG_FETCH_MESSAGE_MAX_BYTES: "524288000"
+      PATH: "/opt/bitnami/common/bin:/opt/bitnami/java/bin:/opt/bitnami/kafka/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      JAVA_HOME: "/opt/bitnami/java"
+      HOME: "/"
+      OS_ARCH: "arm64"
+      OS_FLAVOUR: "debian-12"
+      OS_NAME: "linux"
+      APP_VERSION: "3.9.0"
+      BITNAMI_APP_NAME: "kafka"
+    entrypoint: ["/opt/bitnami/scripts/kafka/entrypoint.sh"]
+    command: ["/opt/bitnami/scripts/kafka/run.sh"]
+    healthcheck:
+      test: [ "CMD", "kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9092" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     networks:
       - specshield-network
-    healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
 
 volumes:
   mongodb_data:
