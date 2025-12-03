@@ -73,7 +73,7 @@ Tests are grouped by base URL and executed in parallel groups for optimal perfor
 
 ### Using Docker Compose
 ```bash
-# Build and start the application with MongoDB
+# Build and start the application with MongoDB and Kafka
 docker-compose up --build
 
 # Access the application
@@ -82,17 +82,10 @@ curl http://localhost:9000/specshield/api/execute
 
 ### Local Development
 1. Start MongoDB locally on port 27017
-2. Run the Spring Boot application
-3. Application will be available at http://localhost:9000
+2. Start Kafka locally on port 9092
+3. Run the Spring Boot application
+4. Application will be available at http://localhost:9000
 
 ## Configuration
 - **Port**: 9000
 - **Context Path**: /specshield
-- **MongoDB**: Configurable via SPRING_DATA_MONGODB_URI environment variable
-
-## Dependencies
-- Spring Boot 4.0.0
-- Spring Data MongoDB
-- Spring WebFlux (for HTTP client)
-- JsonPath (for JSON assertions)
-- Lombok (for reducing boilerplate code)
