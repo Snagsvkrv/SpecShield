@@ -39,7 +39,7 @@ SpecShield is an intelligent API testing automation framework built with Spring 
 
 ## System Design
 
-The complete system architecture and data flow is illustrated in the [SpecShield System Architecture Diagram](./SpecShield.drawio). This diagram shows:
+The complete system architecture and data flow is illustrated in the ![System Architecture](diagrams/rendered/system.svg). This diagram shows:
 
 1. **Input Processing**: Swagger/OpenAPI contract parsing and API model conversion
 2. **Test Generation**: Automated test suite creation with seed data integration
