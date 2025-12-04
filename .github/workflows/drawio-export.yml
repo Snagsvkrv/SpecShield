@@ -14,18 +14,20 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Export draw.io → SVG using official batch exporter
+      - name: Export drawio → SVG (public working image)
         uses: addnab/docker-run-action@v3
         with:
-          image: ghcr.io/jgraph/drawio-batch:latest
+          image: rlespinasse/drawio-export:latest
           options: -v ${{ github.workspace }}:/data
           run: |
             mkdir -p /data/diagrams/rendered
             for f in $(find /data/diagrams -name "*.drawio"); do
               base=$(basename "$f" .drawio)
               echo "Exporting $f → /data/diagrams/rendered/$base.svg"
-              /drawio-batch \
+              drawio --export \
                 --format svg \
+                --no-sandbox \
+                --force \
                 --output "/data/diagrams/rendered/$base.svg" \
                 "$f"
             done
@@ -35,5 +37,5 @@ jobs:
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
           git add diagrams/rendered/*.svg || true
-          git commit -m "Auto-exported draw.io diagrams (SVG)" || echo "No changes"
+          git commit -m "Auto-rendered draw.io SVG diagrams" || echo "No changes"
           git push
