@@ -46,8 +46,9 @@ public class TestSuiteGenerator {
             req.setHeaders(inputHeaders != null ? inputHeaders : new HashMap<>());
             req.setPathParams(new HashMap<>());
             req.setQueryParams(new HashMap<>());
-
-            if ("GET".equalsIgnoreCase(api.getMethod())) {
+            boolean isGet = "GET".equalsIgnoreCase(api.getMethod());
+            boolean treatAsGetWithBody = isGetWithBody(api);
+            if (isGet && !treatAsGetWithBody) {
                 //req.setBody(null);
 
                 // populate query parameters
@@ -193,6 +194,13 @@ public class TestSuiteGenerator {
             // Add to test suite
             cases.add(invalidPgTest);
         }
+    }
 
+    private boolean isGetWithBody(ApiSpec api) {
+        if (!"GET".equalsIgnoreCase(api.getMethod())) return false;
+
+        String url = api.getPath().toLowerCase();
+        // Only one rule: GET + URL contains "list"
+        return url.contains("list");
     }
 }

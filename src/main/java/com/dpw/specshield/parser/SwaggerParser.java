@@ -1,5 +1,6 @@
 package com.dpw.specshield.parser;
 
+import com.dpw.specshield.model.ApiSpec;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -91,8 +92,11 @@ public class SwaggerParser {
 
     private boolean skipEndpoint(String path, String httpMethod) {
         String p = path.toLowerCase();
-        if ("PATCH".equalsIgnoreCase(httpMethod) || "PUT".equalsIgnoreCase(httpMethod)
-                || "OPTIONS".equalsIgnoreCase(httpMethod) ||"HEAD".equalsIgnoreCase(httpMethod)) return true;
+        if ("PATCH".equalsIgnoreCase(httpMethod)
+                || "PUT".equalsIgnoreCase(httpMethod)
+                || "OPTIONS".equalsIgnoreCase(httpMethod)
+                ||"HEAD".equalsIgnoreCase(httpMethod)
+                ||"DELETE".equalsIgnoreCase(httpMethod)) return true;
         if ("POST".equalsIgnoreCase(httpMethod) && !p.contains("list")) return true;
         return p.contains("create");
     }
