@@ -1,5 +1,6 @@
 package com.dpw.specshield.parser;
 
+import com.dpw.specshield.model.ApiSpec;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
