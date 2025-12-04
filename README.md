@@ -17,15 +17,17 @@ SpecShield is an intelligent API testing automation framework built with Spring 
 - **Dynamic Parameter Handling**: Path parameters, query parameters, headers, and body payloads
 - **JSON Path Assertions**: Sophisticated response validation with configurable assertions
 - **Comprehensive Result Tracking**: Success, error, and warning categorization with detailed metrics
+- **Historical Test Analytics**: Track test execution trends over time with hash-based unique test identification
 
 ## System Architecture
 
 ### Core Services
-1. **TestSuiteService**: Orchestrates test suite generation and execution workflow
-2. **ExecutorService**: Manages parallel test execution with real-time result updates
-3. **ReportCollector**: Aggregates and formats comprehensive test reports
-4. **SwaggerParser**: Processes OpenAPI/Swagger specifications
-5. **TestSuiteGenerator**: Creates executable test cases from API specifications
+1. **SwaggerParser**: Processes OpenAPI/Swagger specifications
+2. **TestSuiteGenerator**: Creates executable test cases from API specifications
+3. **TestSuiteService**: Orchestrates test suite generation and execution workflow
+4. **ExecutorService**: Manages parallel test execution with real-time result updates
+5. **ReportCollector**: Aggregates and formats comprehensive test reports
+6. **HistoryService**: Provides historical test analytics and trend tracking
 
 ### Data Flow Components
 - **SwaggerToApiModelConverter**: Transforms parsed Swagger into internal API models
@@ -94,6 +96,64 @@ Content-Type: application/json
 GET /specshield/api/report/{reportId}
 ```
 
+### Generate Test Suite from Swagger
+```
+POST /specshield/generate
+Content-Type: application/json
+tenantId: {your-tenant-id}
+
+{
+  "openApiUrl": "https://api.example.com/v3/api-docs",
+  "endpoints": {
+    "/users": ["GET", "POST"],
+    "/users/{id}": ["GET", "PUT", "DELETE"]
+  },
+  "testConfig": {
+    "includeHappyPath": true,
+    "includeEdgeCases": true
+  }
+}
+```
+
+## History API Endpoints
+
+The History API provides comprehensive analytics and tracking of test execution trends over time.
+
+### Get All Test History
+```
+GET /specshield/history/tests?tenantId={tenant}&baseUrl={url}
+```
+Returns a list of all tests with their execution history, success rates, and recent trends.
+
+### Get Test History by Contract Path
+```
+GET /specshield/history/tests/contractPath?tenantId={tenant}&baseUrl={url}&contractPath={path}
+```
+Returns detailed history for tests related to a specific API contract path.
+
+### Get Test Summary Statistics
+```
+GET /specshield/history/tests/summary?tenantId={tenant}&baseUrl={url}
+```
+Returns aggregated statistics including:
+- Total unique tests
+- Total executions
+- Overall success rate
+- Summary metrics
+
+**Example Response:**
+```json
+{
+  "tenantId": "demo",
+  "baseUrl": "https://api.example.com",
+  "totalUniqueTests": 25,
+  "totalExecutions": 150,
+  "totalSuccesses": 142,
+  "overallSuccessRate": 94.67,
+  "timestamp": "2025-12-05T01:11:53.808987"
+}
+```
+
 ## Parallel Processing
 Tests are grouped by base URL and executed in parallel groups for optimal performance:
 - Each URL group runs in its own CompletableFuture
@@ -120,3 +180,28 @@ curl http://localhost:9000/specshield/api/execute
 ## Configuration
 - **Port**: 9000
 - **Context Path**: /specshield
+
+## Historical Test Tracking
+
+SpecShield automatically tracks test execution history using a unique hash-based identification system:
+
+### Test Key Generation
+Each test is uniquely identified by a hash of:
+- Contract Path
+- HTTP Method
+- Test Type (happypath/negative)
+- Request signature (query params/payload pattern)
+- Expected response code
+
+### Analytics Features
+- **Trend Analysis**: Track success rate changes over time
+- **Regression Detection**: Identify tests with declining performance
+- **Execution Statistics**: Monitor test frequency and reliability
+- **Contract-based Filtering**: View history for specific API endpoints
+
+### Data Storage
+All test execution history is stored in MongoDB with the following structure:
+- Test execution results with timestamps
+- Aggregated success rates and counts
+- Recent execution trends (last 5-10 runs)
+- Contract path and method metadata
