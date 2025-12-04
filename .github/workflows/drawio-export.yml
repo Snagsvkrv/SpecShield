@@ -14,27 +14,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Install Node.js
-        uses: actions/setup-node@v4
+      - name: Export drawio files using Docker
+        uses: addnab/docker-run-action@v3
         with:
-          node-version: "18"
-
-      - name: Install Draw.io CLI
-        run: npm install -g @drawio/batch-cli
-
-      - name: Export diagrams
-        run: |
-          mkdir -p diagrams/rendered
-          for file in $(find diagrams -name "*.drawio"); do
-            base=$(basename "$file" .drawio)
-            drawio-batch convert "$file" "diagrams/rendered/$base.svg" --format svg
-            echo "Exported $file → diagrams/rendered/$base.svg"
-          done
+          image: rlespinasse/drawio-export:latest
+          options: -v ${{ github.workspace }}:/data
+          run: |
+            mkdir -p diagrams/rendered
+            for f in $(find diagrams -name '*.drawio'); do
+              base=$(basename "$f" .drawio)
+              drawio --no-sandbox -x -f svg -o /data/diagrams/rendered "$f"
+              echo "Exported $f → diagrams/rendered/$base.png"
+            done
 
       - name: Commit rendered SVGs
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
           git add diagrams/rendered/*.svg
-          git commit -m "Auto-rendered Draw.io diagrams" || echo "No changes to commit"
+          git commit -m "Auto-rendered draw.io diagrams" || echo "No changes"
           git push
