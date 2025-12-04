@@ -29,6 +29,7 @@ import org.springframework.web.client.RestTemplate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.Duration;
+import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
@@ -245,7 +246,7 @@ public class ExecutorServiceImpl implements IExecutorService {
 
             } catch (Exception e) {
                 log.error("Error in asynchronous test execution for request {}: {}",
-                         request.getId(), e.getMessage());
+                         request.getId(), e.getMessage(), e);
 
                 testResult.setStatus("FAILED");
                 testResultRepository.save(testResult);
@@ -306,7 +307,6 @@ public class ExecutorServiceImpl implements IExecutorService {
             execution.setRequestDetails(buildRequestDetails(testCase, fullUrl));
             execution.setResponseDetails(buildResponseDetailsFromRestException(e));
 
-            // Check if this is an expected error status code
             boolean testPassed = validateResponseFromRestException(e, execution.getExpectedResult());
 
             if (testPassed) {
@@ -322,13 +322,15 @@ public class ExecutorServiceImpl implements IExecutorService {
             execution.setResult("error");
             execution.setResultDetails(String.format("Execution Error: %s", e.getMessage()));
 
-            // Set empty response details for general exceptions
             TestExecution.ResponseDetails details = new TestExecution.ResponseDetails();
             details.setResponseStatus(null);
             details.setResponseBody("Error occurred before receiving response: " + e.getMessage());
             details.setResponseHeaders(new HashMap<>());
             execution.setResponseDetails(details);
         }
+
+        execution.setTestKey(generateTestKey(execution));
+        log.info("Generated testKey: {} for test case: {}", execution.getTestKey(), execution.getId());
 
         return execution;
     }
@@ -337,22 +339,17 @@ public class ExecutorServiceImpl implements IExecutorService {
         String url = buildFullUrl(testCase, baseUrl);
         HttpMethod method = HttpMethod.valueOf(testCase.getEndpoint().getMethod().toUpperCase());
 
-        // Build headers
         HttpHeaders headers = new HttpHeaders();
         if (testCase.getRequest().getHeaders() != null) {
             testCase.getRequest().getHeaders().forEach(headers::add);
         }
 
-        // Build request body
         String requestBody = null;
         if (testCase.getRequest().getBody() != null) {
             requestBody = JsonUtils.toJsonString(testCase.getRequest().getBody());
         }
-
-        // Create HTTP entity
         HttpEntity<String> entity = new HttpEntity<>(requestBody, headers);
 
-        // Make the request using RestTemplate
         return restTemplate.exchange(url, method, entity, String.class);
     }
 
@@ -379,12 +376,10 @@ public class ExecutorServiceImpl implements IExecutorService {
 
 
     private boolean validateResponse(ResponseEntity<String> response, ExpectedResult expectedResult) {
-        // First validate the primary status code expectation
         if (!Integer.valueOf(response.getStatusCode().value()).equals(expectedResult.getStatusCode())) {
             return false;
         }
 
-        // Then validate all assertions
         if (expectedResult.getAssertions() != null) {
             for (TestAssertion assertion : expectedResult.getAssertions()) {
                 if (!validateAssertion(response, assertion)) {
@@ -397,7 +392,6 @@ public class ExecutorServiceImpl implements IExecutorService {
     }
 
     private boolean validateAssertion(ResponseEntity<String> response, TestAssertion assertion) {
-        // Handle status code assertions
         if ("statusCode".equals(assertion.getType())) {
             int statusCode = response.getStatusCode().value();
             switch (assertion.getCondition()) {
@@ -411,12 +405,10 @@ public class ExecutorServiceImpl implements IExecutorService {
             }
         }
 
-        // Handle body assertions
         if ("body".equals(assertion.getType()) && response.getBody() != null) {
             return validateTestAssertion(response.getBody(), assertion);
         }
 
-        // For other types, use the original validation method
         if (response.getBody() != null) {
             return validateTestAssertion(response.getBody(), assertion);
         }
@@ -427,13 +419,10 @@ public class ExecutorServiceImpl implements IExecutorService {
 
     private boolean validateTestAssertion(String responseBody, TestAssertion assertion) {
         try {
-            // Handle status code assertions differently - they don't use JsonPath
             if ("statusCode".equals(assertion.getType())) {
-                // Status code assertions are handled at the response level, not here
                 return true;
             }
 
-            // For body assertions, we need a jsonPath
             if (assertion.getJsonPath() == null || assertion.getJsonPath().isEmpty()) {
                 log.warn("JsonPath is required for non-statusCode assertion type: {} with condition: {}",
                          assertion.getType(), assertion.getCondition());
@@ -576,8 +565,6 @@ public class ExecutorServiceImpl implements IExecutorService {
         } else if (e instanceof HttpServerErrorException serverException) {
             return buildResponseDetailsFromRestException(serverException);
         }
-
-        // Fallback for other exceptions
         TestExecution.ResponseDetails details = new TestExecution.ResponseDetails();
         details.setResponseStatus(null);
         details.setResponseBody("Error occurred: " + e.getMessage());
@@ -586,12 +573,10 @@ public class ExecutorServiceImpl implements IExecutorService {
     }
 
     private boolean validateResponseFromRestException(HttpClientErrorException exception, ExpectedResult expectedResult) {
-        // First validate the primary status code expectation
         if (!Integer.valueOf(exception.getStatusCode().value()).equals(expectedResult.getStatusCode())) {
             return false;
         }
 
-        // Then validate all assertions
         if (expectedResult.getAssertions() != null) {
             for (TestAssertion assertion : expectedResult.getAssertions()) {
                 if (!validateAssertionFromException(exception, assertion)) {
@@ -604,12 +589,10 @@ public class ExecutorServiceImpl implements IExecutorService {
     }
 
     private boolean validateResponseFromRestException(HttpServerErrorException exception, ExpectedResult expectedResult) {
-        // First validate the primary status code expectation
         if (!Integer.valueOf(exception.getStatusCode().value()).equals(expectedResult.getStatusCode())) {
             return false;
         }
 
-        // Then validate all assertions
         if (expectedResult.getAssertions() != null) {
             for (TestAssertion assertion : expectedResult.getAssertions()) {
                 if (!validateAssertionFromException(exception, assertion)) {
@@ -635,7 +618,6 @@ public class ExecutorServiceImpl implements IExecutorService {
             return false;
         }
 
-        // Handle status code assertions
         if ("statusCode".equals(assertion.getType())) {
             switch (assertion.getCondition()) {
                 case "EQUALS":
@@ -648,12 +630,10 @@ public class ExecutorServiceImpl implements IExecutorService {
             }
         }
 
-        // Handle body assertions
         if ("body".equals(assertion.getType()) && responseBody != null) {
             return validateTestAssertion(responseBody, assertion);
         }
 
-        // For other types, use the original validation method
         if (responseBody != null) {
             return validateTestAssertion(responseBody, assertion);
         }
@@ -668,5 +648,67 @@ public class ExecutorServiceImpl implements IExecutorService {
             return validateResponseFromRestException(serverException, expectedResult);
         }
         return false;
+    }
+
+    private String generateTestKey(TestExecution execution) {
+        StringBuilder keyComponents = new StringBuilder();
+
+        keyComponents.append(execution.getContractPath());
+        keyComponents.append("|");
+
+        keyComponents.append(execution.getHttpMethod().toUpperCase());
+        keyComponents.append("|");
+
+        String testType = execution.getExpectedResult().getStatusCode() < 400 ? "happypath" : "negative";
+        keyComponents.append(testType);
+        keyComponents.append("|");
+
+        String requestSignature = extractRequestSignature(execution);
+        keyComponents.append(requestSignature);
+        keyComponents.append("|");
+
+        keyComponents.append(execution.getExpectedResult().getStatusCode());
+
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            byte[] hashBytes = md.digest(keyComponents.toString().getBytes("UTF-8"));
+            StringBuilder hash = new StringBuilder();
+            for (byte b : hashBytes) {
+                hash.append(String.format("%02x", b));
+            }
+            String generatedHash = hash.toString().substring(0, 16);
+            log.debug("Generated testKey: {} for components: {}", generatedHash, keyComponents.toString());
+            return generatedHash;
+        } catch (Exception e) {
+            log.error("Error generating test key hash", e);
+            return keyComponents.toString().replaceAll("[^a-zA-Z0-9]", "_");
+        }
+    }
+
+    private String extractRequestSignature(TestExecution execution) {
+        String method = execution.getHttpMethod().toLowerCase();
+
+        if ("get".equals(method)) {
+            String fullPath = execution.getFullRequestPath();
+            if (fullPath.contains("?")) {
+                String queryString = fullPath.substring(fullPath.indexOf("?") + 1);
+                return queryString;
+            }
+            return "";
+        } else if ("post".equals(method) || "put".equals(method)) {
+            String payload = execution.getRequestDetails().getPayload();
+            if (payload != null && !payload.trim().isEmpty() && !"null".equals(payload)) {
+                try {
+                    Object jsonObject = objectMapper.readValue(payload, Object.class);
+                    return objectMapper.writeValueAsString(jsonObject); // Normalized JSON
+                } catch (Exception e) {
+                    log.warn("Failed to normalize JSON payload, using original: {}", e.getMessage());
+                    return payload;
+                }
+            }
+            return "";
+        }
+
+        return "";
     }
 }

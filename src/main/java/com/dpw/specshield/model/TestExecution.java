@@ -7,6 +7,7 @@ import java.util.Map;
 @Data
 public class TestExecution {
     private String id;
+    private String testKey;  // Hash-based unique identifier for tracking test history
     private LocalDateTime timestamp;
     private String scenario;
     private ExpectedResult expectedResult;
