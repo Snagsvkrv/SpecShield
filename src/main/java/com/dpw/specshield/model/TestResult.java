@@ -22,4 +22,6 @@ public class TestResult {
     private Integer pendingTests;
     private String status; // PENDING, PROCESSING, COMPLETED, FAILED
     private List<TestExecution> executions;
+    private String baseUrl;
+    private String tenantId;
 }
